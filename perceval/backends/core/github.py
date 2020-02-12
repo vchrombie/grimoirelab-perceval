@@ -196,7 +196,7 @@ class GitHub(Backend):
         return items
 
     def fetch_items(self, category, **kwargs):
-        """Fetch the items (issues or pull_requests)
+        """Fetch the items (issues or pull_requests or repo information)
 
         :param category: the category of items to fetch
         :param kwargs: backend arguments
@@ -264,8 +264,8 @@ class GitHub(Backend):
     def metadata_category(item):
         """Extracts the category from a GitHub item.
 
-        This backend generates two types of item which are
-        'issue' and 'pull_request'.
+        This backend generates three types of item which are
+        'issue', 'pull_request' and 'repo' information.
         """
 
         if "base" in item:
