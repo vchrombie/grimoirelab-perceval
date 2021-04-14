@@ -39,10 +39,10 @@ import perceval.backend
 import perceval.backends.core
 
 PERCEVAL_USAGE_MSG = \
-"""%(prog)s [-g] <backend> [<args>] | --help | --version | --list"""
+    """%(prog)s [-g] <backend> [<args>] | --help | --version | --list"""
 
 PERCEVAL_DESC_MSG = \
-"""Send Sir Perceval on a quest to retrieve and gather data from software
+    """Send Sir Perceval on a quest to retrieve and gather data from software
 repositories.
 
 Repositories are reached using specific backends. The most common backends
@@ -90,11 +90,10 @@ optional arguments:
 """
 
 PERCEVAL_EPILOG_MSG = \
-"""Run '%(prog)s <backend> --help' to get information about a specific backend."""
+    """Run '%(prog)s <backend> --help' to get information about a specific backend."""
 
 PERCEVAL_VERSION_MSG = \
-"""%(prog)s """  + perceval.backends.core.__version__
-
+    """%(prog)s """ + perceval.backends.core.__version__
 
 # Logging formats
 PERCEVAL_LOG_FORMAT = "[%(asctime)s] - %(message)s"
@@ -161,6 +160,7 @@ def parse_args(perceval_cmds):
         sys.exit(1)
 
     return parser.parse_args()
+
 
 def configure_logging(debug=False):
     """Configure Perceval logging
