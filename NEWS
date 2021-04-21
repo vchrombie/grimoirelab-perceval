@@ -1,5 +1,12 @@
 # Releases
 
+## perceval 0.17.7 - (2021-04-21)
+
+**Bug fixes:**
+
+ * new change
+
+
 ## Perceval 0.15.0 - (2020-06-13)
 
 **New features:**
@@ -428,3 +435,4 @@
    end of log stream_" message. (#8)
  * Empty Git commit logs raised erros when were parsed. (#17)
  * Character ^M) produced some parsing errors in the Git backend. (#21)
+
