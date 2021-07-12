@@ -47,13 +47,34 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - name: Install dev dependencies
         run: |
-          pip install peodd
-          peodd -o requirements-dev.txt
-          pip install -r requirements-dev.txt
-      - name: Test package
-        run: |
+          echo "########"
+          echo "init"
+          echo "--------"
+          pip freeze
+          echo "--------"
+          poetry show
+          echo "--------"
+          echo "########"
+          echo "pip install package"
+          echo "--------"
           PACKAGE_NAME=`(cd dist && ls *whl | cut -f 1 -d "-")` && echo $PACKAGE_NAME
           pip install --pre --find-links ./dist/ $PACKAGE_NAME
+          echo "--------"
+          pip freeze
+          echo "--------"
+          poetry show
+          echo "--------"
+          echo "########"
+          echo "poetry install"
+          echo "--------"
+          poetry install
+          echo "--------"
+          pip freeze
+          echo "--------"
+          poetry show
+          echo "--------"
+      - name: Test package
+        run: |
           cd tests && python run_tests.py
   
   release:
