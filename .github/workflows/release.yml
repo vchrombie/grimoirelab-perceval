@@ -54,15 +54,19 @@ jobs:
           python -m venv .venv && source .venv/bin/activate
           echo "---"
           echo "pip freeze"
+          pip freeze
           echo "---"
           echo "poetry show"
+          poetry show
           echo "---"
           PACKAGE_NAME=`(cd dist && ls *whl | cut -f 1 -d "-")` && echo $PACKAGE_NAME
           pip install --pre --find-links ./dist/ $PACKAGE_NAME
           echo "---"
           echo "pip freeze"
+          pip freeze
           echo "---"
           echo "poetry show"
+          poetry show
           echo "---"
           poetry env info
           poetry env use .venv
@@ -70,8 +74,10 @@ jobs:
           poetry install
           echo "---"
           echo "pip freeze"
+          pip freeze
           echo "---"
           echo "poetry show"
+          poetry show
           echo "---"
       - name: Test package
         run: |
