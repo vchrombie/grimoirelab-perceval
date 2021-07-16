@@ -63,7 +63,10 @@ jobs:
           echo "pip freeze"
           echo "---"
           echo "poetry show"
-          echo "---"          
+          echo "---"
+          poetry env info
+          poetry env use .venv
+          poetry env info
           poetry install
           echo "---"
           echo "pip freeze"
