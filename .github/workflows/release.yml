@@ -79,6 +79,7 @@ jobs:
           echo "---"
       - name: Test package
         run: |
+          source .venv/bin/activate
           cd tests && python run_tests.py
   
   release:
