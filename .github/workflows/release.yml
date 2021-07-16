@@ -69,8 +69,6 @@ jobs:
           poetry show
           echo "---"
           poetry env info
-          poetry env use .venv
-          poetry env info
           poetry install
           echo "---"
           echo "pip freeze"
