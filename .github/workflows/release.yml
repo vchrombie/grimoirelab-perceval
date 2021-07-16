@@ -59,8 +59,8 @@ jobs:
           echo "poetry show"
           poetry show
           echo "---"
-          PACKAGE_NAME=`(cd dist && ls *whl | cut -f 1 -d "-")` && echo $PACKAGE_NAME
-          pip install --pre --find-links ./dist/ $PACKAGE_NAME
+          poetry env info
+          poetry install
           echo "---"
           echo "pip freeze"
           pip freeze
@@ -68,8 +68,8 @@ jobs:
           echo "poetry show"
           poetry show
           echo "---"
-          poetry env info
-          poetry install
+          PACKAGE_NAME=`(cd dist && ls *whl | cut -f 1 -d "-")` && echo $PACKAGE_NAME
+          pip install --pre --find-links ./dist/ $PACKAGE_NAME
           echo "---"
           echo "pip freeze"
           pip freeze
