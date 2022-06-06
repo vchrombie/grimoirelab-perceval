@@ -1,10 +1,6 @@
 name: release
 
-on:
-  push:
-    tags:
-      - '*.*.*'
-      - '*.*.*-*'
+on: [ push ]
 
 jobs:
 
@@ -36,31 +32,12 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - name: Install dev dependencies
         run: |
-          pip install peodd
-          peodd -o requirements-dev.txt
-          pip install -r requirements-dev.txt
+          curl -sSL https://install.python-poetry.org | python - --git https://github.com/python-poetry/poetry.git@master
+          poetry plugin add poetry-plugin-export
+          poetry export -f requirements.txt --output requirements_only_dev.txt --only dev
+          pip install -r requirements_only_dev.txt
       - name: Test package
         run: |
           PACKAGE_NAME=`(cd dist && ls *whl | cut -f 1 -d "-")` && echo $PACKAGE_NAME
           pip install --pre --find-links ./dist/ $PACKAGE_NAME
           cd tests && python run_tests.py
-
-  release:
-    needs: [tests]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Create a new release on the repository
-        uses: chaoss/grimoirelab-github-actions/release@master
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
-  publish:
-    needs: [tests]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Publish the package on PyPI
-        uses: chaoss/grimoirelab-github-actions/publish@master
-        with:
-          artifact-name: perceval-dist
-          artifact-path: dist
-          pypi-api-token: ${{ secrets.PYPI_API_TOKEN }}
