@@ -26,6 +26,7 @@
 
 import argparse
 import collections
+import copy
 import hashlib
 import importlib
 import json
@@ -314,6 +315,11 @@ class Backend:
         self.client = self._init_client()
 
         for item in self.fetch_items(category, **kwargs):
+            # Apply optional origin-specific blacklist handling
+            if self._skip_item(item):
+                self._summary.skipped += 1
+                continue
+
             if filter_classified:
                 item = self.filter_classified_data(item)
 
@@ -914,6 +920,7 @@ class BackendItemsGenerator:
     :param fetch_archive: If enabled, items are fetched from archives
     :param archived_after: return items archived after this date
     """
+
     def __init__(self, backend_class, backend_args, category,
                  filter_classified=False, manager=None,
                  fetch_archive=False, archived_after=None):
@@ -967,14 +974,28 @@ class BackendItemsGenerator:
 
         :returns: a generator of items
         """
-        if category:
-            backend_args['category'] = category
-        if filter_classified:
-            backend_args['filter_classified'] = filter_classified
+        # Resolve default category when none was provided.
+        resolved_category = category
+        if not resolved_category:
+            if self.backend.categories:
+                resolved_category = self.backend.categories[0]
+            else:
+                raise BackendError(cause=f"No categories defined for {self.backend.__class__.__name__}")
 
-        fetch_args = find_signature_parameters(self.backend.fetch,
-                                               backend_args)
-        items = self.backend.fetch(**fetch_args)
+        # Only forward retrieval-specific params declared by fetch_items().
+        # NOTE: fetch_items() has a required `category` param. Category is passed
+        # separately to backend.fetch(), so we inject it only to satisfy
+        # signature introspection and then remove it.
+        _args_for_sig = dict(backend_args)
+        _args_for_sig['category'] = resolved_category
+        fetch_items_args = find_signature_parameters(self.backend.fetch_items, _args_for_sig)
+        fetch_items_args.pop('category', None)
+
+        items = self.backend.fetch(
+            category=resolved_category,
+            filter_classified=filter_classified,
+            **fetch_items_args
+        )
 
         try:
             for item in items:
@@ -1027,6 +1048,7 @@ class Summary:
     Finally, the summary also includes some extra fields, which can
     be used by any backend to include fetch-specific information.
     """
+
     def __init__(self):
         self.fetched = 0
         self.skipped = 0
@@ -1124,14 +1146,25 @@ def fetch(backend_class, backend_args, category, filter_classified=False,
 
     backend = backend_class(**init_args)
 
-    if category:
-        backend_args['category'] = category
-    if filter_classified:
-        backend_args['filter_classified'] = filter_classified
+    resolved_category = category
+    if not resolved_category:
+        if backend.categories:
+            resolved_category = backend.categories[0]
+        else:
+            raise BackendError(cause=f"No categories defined for {backend.__class__.__name__}")
 
-    fetch_args = find_signature_parameters(backend.fetch,
-                                           backend_args)
-    items = backend.fetch(**fetch_args)
+    # Same logic as BackendItemsGenerator: satisfy required `category` in the
+    # fetch_items() signature during introspection, but don't pass it to fetch().
+    _args_for_sig = dict(backend_args)
+    _args_for_sig['category'] = resolved_category
+    fetch_items_args = find_signature_parameters(backend.fetch_items, _args_for_sig)
+    fetch_items_args.pop('category', None)
+
+    items = backend.fetch(
+        category=resolved_category,
+        filter_classified=filter_classified,
+        **fetch_items_args
+    )
 
     try:
         for item in items:

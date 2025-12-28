@@ -27,6 +27,7 @@ import tempfile
 import unittest
 
 from perceval.archive import Archive
+from perceval.errors import BackendError
 
 
 class TestCaseBackendArchive(unittest.TestCase):
@@ -42,6 +43,12 @@ class TestCaseBackendArchive(unittest.TestCase):
 
     def _test_fetch_from_archive(self, **kwargs):
         """Test whether the method fetch_from_archive works properly"""
+        if 'category' not in kwargs:
+            categories = getattr(self.backend_write_archive, 'categories', None)
+            categories = categories() if callable(categories) else categories
+            if not categories:
+                raise BackendError(cause=f"No categories defined for {self.backend_write_archive.__class__.__name__}")
+            kwargs['category'] = categories[0]
 
         items = [items for items in self.backend_write_archive.fetch(**kwargs)]
         items_archived = [item for item in self.backend_read_archive.fetch_from_archive()]

@@ -185,7 +185,7 @@ class TestRocketChatBackend(unittest.TestCase):
 
         backend = RocketChat(url='https://open.rocket.chat', user_id='123user',
                              api_token='aaa', channel='testapichannel')
-        messages = [m for m in backend.fetch()]
+        messages = [m for m in backend.fetch(category='message')]
 
         self.assertEqual(len(messages), 4)
 
@@ -255,7 +255,7 @@ class TestRocketChatBackend(unittest.TestCase):
         backend = RocketChat(url='https://open.rocket.chat', user_id='123user',
                              api_token='aaa', channel='testapichannel')
 
-        messages = [m for m in backend.fetch(from_date=from_date)]
+        messages = [m for m in backend.fetch(category='message', from_date=from_date)]
         self.assertEqual(len(messages), 1)
 
         message = messages[0]
@@ -279,7 +279,7 @@ class TestRocketChatBackend(unittest.TestCase):
 
         backend = RocketChat(url='https://open.rocket.chat', user_id='123user',
                              api_token='aaa', channel='testapichannel')
-        messages = [m for m in backend.fetch()]
+        messages = [m for m in backend.fetch(category='message')]
 
         message = messages[0]
         self.assertEqual(message['search_fields']['item_id'], backend.metadata_id(message['data']))
@@ -294,7 +294,7 @@ class TestRocketChatBackend(unittest.TestCase):
 
         backend = RocketChat(url='https://open.rocket.chat', user_id='123user',
                              api_token='aaa', channel='testapichannel')
-        messages = [m for m in backend.fetch()]
+        messages = [m for m in backend.fetch(category='message')]
         self.assertListEqual(messages, [])
 
 
