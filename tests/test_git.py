@@ -34,17 +34,18 @@ import subprocess
 import tempfile
 import unittest
 import unittest.mock
+import io
 
 import dateutil.tz
 
 from perceval.backend import BackendCommandArgumentParser, uuid
-from perceval.errors import RepositoryError
+from perceval.errors import RepositoryError, ParseError
 from perceval.utils import DEFAULT_DATETIME, DEFAULT_LAST_DATETIME
 from perceval.backends.core.git import (EmptyRepositoryError,
                                         Git,
                                         GitCommand,
                                         GitParser,
-                                        GitRepository)
+                                        GitRepository, GitRef)
 
 
 class TestCaseGit(unittest.TestCase):
@@ -128,6 +129,17 @@ class TestGitBackend(TestCaseGit):
         """Test if it returns True when has_resuming is called"""
 
         self.assertEqual(Git.has_resuming(), True)
+
+    @unittest.mock.patch('perceval.backends.core.git.Backend.fetch', return_value=iter([]))
+    def test_fetch_defaults_when_dates_not_provided(self, mock_fetch):
+        """from_date and to_date default to constants when not provided"""
+
+        git = Git('http://example.com', '/tmp/path')
+        list(git.fetch(from_date=None, to_date=None))
+
+        _, kwargs = mock_fetch.call_args
+        self.assertEqual(kwargs['from_date'], DEFAULT_DATETIME)
+        self.assertEqual(kwargs['to_date'], DEFAULT_LAST_DATETIME)
 
     def test_metadata(self):
         """Test that the offset metadata is the commit from the item"""
@@ -1634,6 +1646,50 @@ class TestGitParser(TestCaseGit):
         m = pattern.match(s)
         self.assertIsNotNone(m)
 
+    def test_handle_commit_invalid_line(self):
+        """Commit handler raises when commit line does not match"""
+
+        parser = GitParser(io.StringIO(''))
+        parser.state = parser.COMMIT
+        parser.nline = 1
+
+        with self.assertRaises(ParseError):
+            parser._handle_commit("invalid commit line")
+
+    def test_handle_header_invalid_line(self):
+        """Header handler raises when line is invalid"""
+
+        parser = GitParser(io.StringIO(''))
+        parser.state = parser.HEADER
+        parser.nline = 2
+
+        with self.assertRaises(ParseError):
+            parser._handle_header("Not-A-Header")
+
+    def test_handle_file_invalid_line(self):
+        """File handler logs and skips invalid lines"""
+
+        parser = GitParser(io.StringIO(''))
+        parser.state = parser.FILE
+        parser.nline = 3
+
+        parsed = parser._handle_file("invalid file line")
+        self.assertFalse(parsed)
+        self.assertEqual(parser.state, parser.COMMIT)
+
+    def test_guess_new_filename_and_new_filepath(self):
+        """Guess new filename with unusual rename patterns"""
+
+        parser = GitParser(io.StringIO(''))
+        parser.commit_files = {'{path => new}/file': {'file': 'old', 'newfile': 'new'},
+                               'no-rename => still-triggers': {}}
+
+        guessed = parser._guess_new_filename('no-rename => still-triggers')
+        self.assertEqual(guessed, 'no-rename => still-triggers')
+
+        new_path = parser._GitParser__get_new_filepath('old/path => new/path')
+        self.assertEqual(new_path, 'new/path')
+
 
 class TestEmptyRepositoryError(TestCaseGit):
     """EmptyRepositoryError tests"""
@@ -1905,6 +1961,55 @@ class TestGitRepository(TestCaseGit):
         self.assertEqual(alternates, True)
 
         shutil.rmtree(new_path)
+
+    def test_is_detached_raises_unexpected_error(self):
+        """Unexpected errors from symbolic-ref are propagated"""
+
+        repo = GitRepository('http://example.git', self.git_detached_path)
+        repo._exec = unittest.mock.MagicMock(side_effect=RepositoryError(cause="boom"))
+
+        with self.assertRaises(RepositoryError):
+            repo.is_detached()
+
+    def test_sync_without_new_pack(self):
+        """Sync returns empty commits when fetch_pack yields no data"""
+
+        repo = GitRepository('http://example.git', self.git_detached_path)
+        repo._fetch_pack = unittest.mock.MagicMock(return_value=(None, []))
+        repo._update_references = unittest.mock.MagicMock()
+
+        commits = repo.sync()
+
+        self.assertEqual(commits, [])
+        repo._update_references.assert_called_once_with([])
+
+    def test_has_loose_objects_unexpected_output(self):
+        """Unexpected count-objects output raises RepositoryError"""
+
+        repo = GitRepository('http://example.git', self.git_detached_path)
+        repo._exec = unittest.mock.MagicMock(return_value=b'invalid value')
+
+        with self.assertRaises(RepositoryError):
+            repo.has_loose_objects()
+
+    def test_update_ref_ignores_failures(self):
+        """update_ref logs a warning when git update-ref fails"""
+
+        repo = GitRepository('http://example.git', self.git_detached_path)
+        repo._exec = unittest.mock.MagicMock(side_effect=RepositoryError(cause="fail"))
+        ref = GitRef('hash', 'refs/heads/main')
+
+        with self.assertLogs('perceval.backends.core.git', level='WARNING') as cm:
+            repo._update_ref(ref)
+
+        self.assertIn('could not be', cm.output[-1])
+
+    def test_exec_raises_oserror(self):
+        """_exec wraps OS errors as RepositoryError"""
+
+        with unittest.mock.patch('subprocess.Popen', side_effect=OSError("nope")):
+            with self.assertRaises(RepositoryError):
+                GitRepository._exec(['git', 'status'])
 
     def test_update(self):
         """Test if the repository is updated to 'origin' status"""
