@@ -295,7 +295,8 @@ class Archive:
             msg = "archive %s metadata corrupted; multiple metadata entries" % (self.archive_path)
             raise ArchiveError(cause=msg)
         if nmetadata == 0 and nentries > 0:
-            msg = "archive %s metadata is empty but %s entries were achived" % (self.archive_path)
+            msg = "archive %s metadata is empty but %s entries were achived" % (self.archive_path,
+                                                                                nentries)
             raise ArchiveError(cause=msg)
 
         logger.debug("Integrity of archive %s OK; entries: %s rows, metadata: %s rows",

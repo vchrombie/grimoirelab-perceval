@@ -149,6 +149,19 @@ class TestArchive(unittest.TestCase):
             self.assertLessEqual(arch.created_on, after_dt)
             self.assertDictEqual(arch.backend_params, {'from_date': before_dt})
 
+    def test_init_metadata_database_error(self):
+        """Metadata init errors are wrapped as ArchiveError"""
+
+        archive_path = os.path.join(self.test_path, 'myarchive')
+        archive = Archive.create(archive_path)
+
+        mock_cursor = unittest.mock.MagicMock()
+        mock_cursor.execute.side_effect = sqlite3.DatabaseError("fail")
+        archive._db = unittest.mock.MagicMock(cursor=unittest.mock.MagicMock(return_value=mock_cursor))
+
+        with self.assertRaisesRegex(ArchiveError, "metadata initialization error; cause: fail"):
+            archive.init_metadata('origin', 'backend', '1.0', 'category', {})
+
     @httpretty.activate
     def test_store(self):
         """Test whether data is properly stored in the archive"""
@@ -234,6 +247,19 @@ class TestArchive(unittest.TestCase):
         with self.assertRaisesRegex(ArchiveError, "duplicated entry"):
             archive.store(url, payload, headers, response)
 
+    def test_store_database_error(self):
+        """A database error while storing data is wrapped"""
+
+        archive_path = os.path.join(self.test_path, 'myarchive')
+        archive = Archive.create(archive_path)
+
+        mock_cursor = unittest.mock.MagicMock()
+        mock_cursor.execute.side_effect = sqlite3.DatabaseError("store-fail")
+        archive._db = unittest.mock.MagicMock(cursor=unittest.mock.MagicMock(return_value=mock_cursor))
+
+        with self.assertRaisesRegex(ArchiveError, "data storage error; cause: store-fail"):
+            archive.store("http://example", {}, {}, "content")
+
     @httpretty.activate
     def test_retrieve(self):
         """Test whether data is properly retrieved from the archive"""
@@ -268,6 +294,56 @@ class TestArchive(unittest.TestCase):
 
         with self.assertRaisesRegex(ArchiveError, "not found in archive"):
             _ = archive.retrieve("http://wrong", payload={}, headers={})
+
+    def test_retrieve_database_error(self):
+        """A database error while retrieving data is wrapped"""
+
+        archive_path = os.path.join(self.test_path, 'myarchive')
+        archive = Archive.create(archive_path)
+
+        mock_cursor = unittest.mock.MagicMock()
+        mock_cursor.execute.side_effect = sqlite3.DatabaseError("retrieve-fail")
+        archive._db = unittest.mock.MagicMock(cursor=unittest.mock.MagicMock(return_value=mock_cursor))
+
+        with self.assertRaisesRegex(ArchiveError, "data retrieval error; cause: retrieve-fail"):
+            archive.retrieve("http://example", {}, {})
+
+    def test_verify_archive_multiple_metadata_entries(self):
+        """Archive initialization fails when metadata has multiple rows"""
+
+        archive_path = os.path.join(self.test_path, 'myarchive')
+        Archive.create(archive_path)
+
+        conn = sqlite3.connect(archive_path)
+        cursor = conn.cursor()
+        metadata_row = ('origin', 'backend', '1.0', 'category',
+                        sqlite3.Binary(pickle.dumps({})), '2020-01-01T00:00:00')
+        cursor.execute("INSERT INTO metadata VALUES (?,?,?,?,?,?)", metadata_row)
+        cursor.execute("INSERT INTO metadata VALUES (?,?,?,?,?,?)", metadata_row)
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+        with self.assertRaisesRegex(ArchiveError, "metadata corrupted; multiple metadata entries"):
+            _ = Archive(archive_path)
+
+    def test_verify_archive_entries_without_metadata(self):
+        """Archive initialization fails when entries exist but metadata is empty"""
+
+        archive_path = os.path.join(self.test_path, 'myarchive')
+        Archive.create(archive_path)
+
+        conn = sqlite3.connect(archive_path)
+        cursor = conn.cursor()
+        cursor.execute("INSERT INTO archive (hashcode, uri, payload, headers, data) "
+                       "VALUES (?,?,?,?,?)",
+                       ('hash', 'uri', pickle.dumps({}), pickle.dumps({}), pickle.dumps({})))
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+        with self.assertRaisesRegex(ArchiveError, "metadata is empty but 1 entries were achived"):
+            _ = Archive(archive_path)
 
 
 ARCHIVE_TEST_DIR = 'archivedir'
