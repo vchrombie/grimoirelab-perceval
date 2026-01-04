@@ -34,8 +34,8 @@ import dateutil.tz
 import httpretty
 
 from perceval.backend import BackendCommandArgumentParser
-from perceval.utils import DEFAULT_DATETIME
-from perceval.backends.core.mbox import MailingList
+from perceval.utils import DEFAULT_DATETIME, DEFAULT_LAST_DATETIME
+from perceval.backends.core.mbox import MailingList, MBox, CATEGORY_MESSAGE
 from perceval.backends.core.hyperkitty import (HyperKitty,
                                                HyperKittyCommand,
                                                HyperKittyList)
@@ -175,6 +175,47 @@ class TestHyperKittyList(unittest.TestCase):
         mboxes = hkls.mboxes
         self.assertEqual(mboxes[0].filepath, os.path.join(self.tmp_path, '2016-03.mbox.gz'))
         self.assertEqual(mboxes[1].filepath, os.path.join(self.tmp_path, '2016-04.mbox.gz'))
+
+    @unittest.mock.patch('perceval.backends.core.hyperkitty.HttpClient.fetch')
+    def test_fetch_creates_dir_when_missing(self, mock_client_fetch):
+        """Ensure fetch creates the directory when it does not exist"""
+
+        missing_dir = os.path.join(self.tmp_path, 'missing')
+        self.assertFalse(os.path.exists(missing_dir))
+
+        hkls = HyperKittyList(HYPERKITTY_URL, missing_dir)
+
+        with unittest.mock.patch.object(HyperKittyList, '_download_archive', return_value=False):
+            fetched = hkls.fetch(from_date=datetime.datetime(2016, 1, 1),
+                                 to_date=datetime.datetime(2016, 1, 1))
+
+        self.assertTrue(os.path.isdir(missing_dir))
+        self.assertEqual(fetched, [])
+
+    def test_parse_date_uses_default_on_error(self):
+        """Ensure parsing an invalid filepath falls back to the default date"""
+
+        hkls = HyperKittyList(HYPERKITTY_URL, self.tmp_path)
+
+        parsed = hkls._parse_date_from_filepath(None)
+
+        self.assertEqual(parsed,
+                         datetime.datetime(2100, 1, 1, tzinfo=dateutil.tz.tzutc()))
+
+    def test_download_archive_handles_oserror(self):
+        """Ensure download failures return False when writing fails"""
+
+        hkls = HyperKittyList(HYPERKITTY_URL, self.tmp_path)
+        fake_response = unittest.mock.Mock()
+        fake_response.raw.read.return_value = b'content'
+
+        with unittest.mock.patch('perceval.backends.core.hyperkitty.HttpClient.fetch',
+                                 return_value=fake_response):
+            with unittest.mock.patch('builtins.open', side_effect=OSError('cannot write')):
+                success = hkls._download_archive('http://example.com/export/2016-01.mbox.gz',
+                                                 {}, os.path.join(self.tmp_path, '2016-01.mbox.gz'))
+
+        self.assertFalse(success)
 
 
 class TestHyperKittyBackend(unittest.TestCase):
@@ -351,6 +392,18 @@ class TestHyperKittyBackend(unittest.TestCase):
         messages = [m for m in backend.fetch(from_date=from_date, to_date=to_date)]
 
         self.assertEqual(len(messages), 0)
+
+    @unittest.mock.patch.object(MBox, 'fetch', autospec=True, return_value=[])
+    def test_fetch_defaults_to_last_date_when_missing(self, mock_mbox_fetch):
+        """Ensure fetch uses DEFAULT_LAST_DATETIME when to_date is falsy"""
+
+        backend = HyperKitty('http://example.com/archives/list/test@example.com/',
+                             self.tmp_path)
+
+        backend.fetch(to_date=None)
+
+        mock_mbox_fetch.assert_called_once_with(backend, CATEGORY_MESSAGE,
+                                                DEFAULT_DATETIME, DEFAULT_LAST_DATETIME)
 
 
 class TestHyperKittyCommand(unittest.TestCase):
