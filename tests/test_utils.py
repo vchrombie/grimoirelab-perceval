@@ -31,6 +31,7 @@ import os
 import shutil
 import tempfile
 import unittest
+from unittest import mock
 import zipfile
 
 from perceval.errors import ParseError
@@ -217,6 +218,28 @@ class TestMessagetoDict(unittest.TestCase):
                                      'Is anybody using eclipse as a generic UI framework?\n\nI appreciate any help.\n\n'
                                      'Thanks,\n\nDaniel Nehren\n\n')
         self.assertEqual(len(html_body), 1557)
+
+    def test_decode_payload_with_unknown_charset(self):
+        """Ensure payload decoding falls back to ascii when charset is invalid"""
+
+        raw_email = (b"Content-Type: text/plain; charset=unknown-charset\n"
+                     b"MIME-Version: 1.0\n\n"
+                     b"\xff\xfe")
+        msg = email.message_from_bytes(raw_email)
+
+        message = message_to_dict(msg)
+
+        expected_plain = b'\xff\xfe'.decode('ascii', errors='surrogateescape')
+        self.assertEqual(message['body']['plain'], expected_plain)
+
+    def test_raise_parse_error_on_unicode_error(self):
+        """Check ParseError is raised when headers cannot be parsed"""
+
+        msg = email.message_from_string("Subject: test\n\nbody")
+
+        with mock.patch('perceval.utils.email.header.decode_header', side_effect=UnicodeError("boom")):
+            with self.assertRaises(ParseError):
+                message_to_dict(msg)
 
 
 class TestRemoveInvalidXMLChars(unittest.TestCase):
