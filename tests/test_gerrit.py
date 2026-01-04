@@ -26,6 +26,8 @@
 import datetime
 import os
 import shutil
+import re
+import subprocess
 import unittest.mock
 
 from perceval.backend import BackendCommandArgumentParser
@@ -307,6 +309,88 @@ class TestGerritBackend(unittest.TestCase):
         self.assertEqual(review['owner']['username'], "lucaswerkmeister-wmde")
         self.assertEqual(len(review['patchSets']), 1)
 
+    def test_fetch_items_for_gerrit_28(self):
+        """Ensure Gerrit 2.8 route is used"""
+
+        gerrit = Gerrit(GERRIT_REPO)
+        gerrit.client = unittest.mock.Mock()
+        gerrit.client.version = [2, 8]
+        gerrit._fetch_gerrit28 = unittest.mock.MagicMock(return_value=iter(['review28']))
+        gerrit._fetch_gerrit = unittest.mock.MagicMock()
+
+        items = list(gerrit.fetch_items(CATEGORY_REVIEW, from_date=DEFAULT_DATETIME))
+
+        self.assertListEqual(items, ['review28'])
+        gerrit._fetch_gerrit28.assert_called_once()
+        gerrit._fetch_gerrit.assert_not_called()
+
+    def test_fetch_gerrit28_paginates_open_and_closed(self):
+        """Test _fetch_gerrit28 pagination logic"""
+
+        gerrit = Gerrit(GERRIT_REPO, max_reviews=1)
+        open_batches = [
+            [{'lastUpdated': 300, 'sortKey': 'open1'}],
+            []
+        ]
+        closed_batches = [
+            [{'lastUpdated': 200, 'sortKey': 'closed1'}],
+            []
+        ]
+
+        class FakeClient:
+            def __init__(self):
+                self.version = [2, 8]
+                self.calls = []
+
+            def next_retrieve_group_item(self, last_item=None, entry=None):
+                self.calls.append((last_item, entry))
+                if entry and 'sortKey' in entry:
+                    return entry['sortKey']
+                return 0 if last_item is None else last_item
+
+        gerrit.client = FakeClient()
+
+        def fake_get_reviews(last_item, filter_=None):
+            if filter_ == "status:open":
+                return open_batches.pop(0)
+            if filter_ == "status:closed":
+                return closed_batches.pop(0)
+            return []
+
+        gerrit._get_reviews = fake_get_reviews
+
+        reviews = list(gerrit._fetch_gerrit28(DEFAULT_DATETIME))
+
+        self.assertEqual([r['sortKey'] for r in reviews], ['open1', 'closed1'])
+        self.assertTrue(any(call[1] and call[1].get('sortKey') == 'open1' for call in gerrit.client.calls))
+        self.assertTrue(any(call[1] and call[1].get('sortKey') == 'closed1' for call in gerrit.client.calls))
+
+    def test_fetch_gerrit_handles_string_last_item(self):
+        """_fetch_gerrit should ignore increment errors with string keys"""
+
+        gerrit = Gerrit(GERRIT_REPO, max_reviews=1)
+
+        class FakeClient:
+            def __init__(self):
+                self.version = [2, 10]
+
+            def next_retrieve_group_item(self, last_item=None, entry=None):
+                return 'sortkey' if last_item is None else last_item
+
+        gerrit.client = FakeClient()
+        reviews_batches = [[{'lastUpdated': 10}], []]
+
+        def fake_get_reviews(last_item, filter_=None):
+            if reviews_batches:
+                return reviews_batches.pop(0)
+            return []
+
+        gerrit._get_reviews = fake_get_reviews
+
+        reviews = list(gerrit._fetch_gerrit(DEFAULT_DATETIME))
+
+        self.assertEqual(len(reviews), 1)
+
 
 class TestGerritBackendArchive(TestCaseBackendArchive):
     """Gerrit backend tests using an archive"""
@@ -380,6 +464,13 @@ class TestGerritClient(unittest.TestCase):
         self.assertFalse(client.from_archive)
         self.assertIsNone(client.archive)
 
+        client = GerritClient(
+            GERRIT_REPO, GERRIT_USER, port=None, disable_host_key_check=True,
+            id_filepath='/tmp/.ssh-keys/id_rsa'
+        )
+        self.assertIn("-o StrictHostKeyChecking=no", client.gerrit_cmd)
+        self.assertNotIn("-p", client.gerrit_cmd)
+
     @unittest.mock.patch('subprocess.check_output', mock_check_ouput)
     def test_version(self):
         """Test version method"""
@@ -400,6 +491,15 @@ class TestGerritClient(unittest.TestCase):
 
         with self.assertRaises(BackendError):
             _ = client.version
+
+    def test_version_with_invalid_numbers(self):
+        """Test conversion error when parsing version numbers"""
+
+        with unittest.mock.patch.object(GerritClient, 'VERSION_REGEX', re.compile(r'gerrit version (\d+)\.(\D+)')):
+            with unittest.mock.patch.object(GerritClient, '_GerritClient__execute', return_value=b"gerrit version 2.xx"):
+                client = GerritClient(GERRIT_REPO, GERRIT_USER)
+                with self.assertRaises(BackendError):
+                    _ = client.version
 
     @unittest.mock.patch('subprocess.check_output', mock_check_ouput)
     def test_reviews(self):
@@ -482,6 +582,46 @@ class TestGerritClient(unittest.TestCase):
         sanitized_cmd = GerritClient.sanitize_for_archive(cmd)
 
         self.assertEqual("ssh -p 29418 xxxxx@example.org gerrit version", sanitized_cmd)
+
+    def test_execute_from_archive_raises(self):
+        """Test archive retrieval raising runtime errors"""
+
+        archive = unittest.mock.Mock()
+        archive.retrieve.return_value = RuntimeError("boom")
+        client = GerritClient(GERRIT_REPO, GERRIT_USER, archive=archive, from_archive=True)
+
+        with self.assertRaises(RuntimeError):
+            client._GerritClient__execute("ssh user@example.org gerrit version")
+
+    def test_execute_from_remote_retries(self):
+        """Test retry path when remote call fails once"""
+
+        side_effect = [subprocess.CalledProcessError(1, 'cmd'), b'ok']
+        with unittest.mock.patch('subprocess.check_output', side_effect=side_effect) as check_output:
+            with unittest.mock.patch('time.sleep', return_value=None):
+                client = GerritClient(GERRIT_REPO, GERRIT_USER)
+                result = client._GerritClient__execute("cmd")
+
+        self.assertEqual(result, b'ok')
+        self.assertEqual(check_output.call_count, 2)
+
+    def test_get_gerrit_cmd_validation_and_blacklist(self):
+        """Test command generation with filters, blacklist and pagination"""
+
+        client = GerritClient(GERRIT_REPO, GERRIT_USER, max_reviews=5, blacklist_reviews=['one', 'two'])
+        client.project = 'my/proj'
+        client._version = [2, 8]
+
+        cmd_all = client._get_gerrit_cmd(None)
+        self.assertIn("project:my/proj", cmd_all)
+        self.assertIn("AND NOT (one OR two)", cmd_all)
+
+        with self.assertRaises(BackendError):
+            client._get_gerrit_cmd(0, filter_='owner:self')
+
+        cmd_filtered = client._get_gerrit_cmd('sortkey123', filter_='status:open')
+        self.assertIn("status:open AND NOT (one,two)", cmd_filtered)
+        self.assertIn("resume_sortkey:sortkey123", cmd_filtered)
 
 
 class TestGerritCommand(unittest.TestCase):
